@@ -1,0 +1,61 @@
+# Builds the full Windows release zip (SavageWind-<version>-windows.zip) with `make dist`,
+# following docs/BUILD-windows.md ("Package"). No game files or game code are involved.
+# Put this file at .github/workflows/windows-dist.yml in the repository root.
+name: Windows dist
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dist:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      # python.org CPython 3.12 for `make gen-helper` (prebuilt unicorn / capstone wheels)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make zip unzip curl git
+            mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-lld mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-vulkan-headers
+            mingw-w64-ucrt-x86_64-vulkan-loader mingw-w64-ucrt-x86_64-shaderc
+            mingw-w64-ucrt-x86_64-spirv-tools mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-vulkan-memory-allocator mingw-w64-ucrt-x86_64-python
+
+      - name: Cache LGPL FFmpeg (make deps-windows)
+        uses: actions/cache@v4
+        with:
+          path: build/deps-win
+          key: deps-win-${{ hashFiles('tools/build_deps_windows.sh') }}
+
+      - name: FFmpeg (LGPL only)
+        run: make deps-windows
+
+      - name: Game code generator helper
+        run: make gen-helper GEN_PY="$(cygpath -u "$pythonLocation")/python.exe"
+
+      - name: Compiler (zig)
+        run: tools/fetch_zig.sh
+
+      - name: Package
+        run: make dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SavageWind-windows
+          path: build/dist/*.zip
+          if-no-files-found: error
